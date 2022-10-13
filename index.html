@@ -2,50 +2,163 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flippy</title>
+    <meta charset="utf-8" />
+    <title>Swiper demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1" />
+    <!-- Link Swiper's CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper/swiper-bundle.min.css" />
 
-    <link rel="stylesheet" href="./src/flipper.css" />
+    <!-- Demo styles -->
+    <style>
+        html,
+        body {
+            position: relative;
+            height: 100%;
+        }
+
+        body {
+            background: #eee;
+            font-family: Helvetica Neue, Helvetica, Arial, sans-serif;
+            font-size: 14px;
+            color: #000;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: Helvetica Neue, Helvetica, Arial, sans-serif;
+            font-size: 14px;
+            color: #000;
+            margin: 0;
+            padding: 0;
+        }
+
+        .swiper {
+            margin: 100px auto;
+            width: 320px;
+            height: 640px;
+        }
+
+        .swiper-slide {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .swiper-slide:nth-child(1n) {
+            background-color: rgb(206, 17, 17);
+        }
+
+        .swiper-slide:nth-child(2n) {
+            background-color: rgb(0, 140, 255);
+        }
+
+        .swiper-slide:nth-child(3n) {
+            background-color: rgb(10, 184, 111);
+        }
+
+        .swiper-slide:nth-child(4n) {
+            background-color: rgb(211, 122, 7);
+        }
+
+        .swiper-slide:nth-child(5n) {
+            background-color: rgb(118, 163, 12);
+        }
+
+        .swiper-slide:nth-child(6n) {
+            background-color: rgb(180, 10, 47);
+        }
+
+        .swiper-slide:nth-child(7n) {
+            background-color: rgb(35, 99, 19);
+        }
+
+        .swiper-slide:nth-child(8n) {
+            background-color: rgb(0, 68, 255);
+        }
+
+        .swiper-slide:nth-child(9n) {
+            background-color: rgb(218, 12, 218);
+        }
+
+        .swiper-slide:nth-child(10n) {
+            background-color: rgb(54, 94, 77);
+        }
+    </style>
 </head>
 
 <body>
-    <nav>
-        <div class="logo">
-            <img src="./src/logo.svg" alt="">
-        </div>
-    </nav>
-    <div class="flipper-board">
-        <div class="flipper-tile vertical">
-            <div class="flipper-tilewrap">
-                <div class="flipper-tilefront">
-                    <blockquote class="twitter-tweet">
-                        <p lang="pt" dir="ltr">Quer saber o que o <a
-                                href="https://twitter.com/FalleNCS?ref_src=twsrc%5Etfw">@FalleNCS</a> passou no pause
-                            tático? <a href="https://twitter.com/hashtag/iem?src=hash&amp;ref_src=twsrc%5Etfw">#iem</a>
-                            <a
-                                href="https://twitter.com/hashtag/ConfiaNoVerdadeiro?src=hash&amp;ref_src=twsrc%5Etfw">#ConfiaNoVerdadeiro</a>
-                            <a href="https://t.co/FkAr1TgipJ">pic.twitter.com/FkAr1TgipJ</a>
-                        </p>&mdash; Dust2 Brasil
-                        🇧🇷 (@dust2_br) <a
-                            href="https://twitter.com/dust2_br/status/1579188511844233217?ref_src=twsrc%5Etfw">October
-                            9, 2022</a>
-                    </blockquote>
-                    <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-                </div>
-                <div class="flipper-tileback">
-                    <blockquote class="twitter-tweet">
-                        <p lang="zxx" dir="ltr"><a href="https://t.co/IrAx1gxll9">pic.twitter.com/IrAx1gxll9</a></p>
-                        &mdash; jrgandara (@jrgandara) <a
-                            href="https://twitter.com/jrgandara/status/1578367300830253056?ref_src=twsrc%5Etfw">October
-                            7, 2022</a>
-                    </blockquote>
-                    <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-                </div>
+    <!-- Swiper -->
+
+
+    <div class="swiper mySwiper4">
+        <div class="swiper-wrapper">
+            <div class="swiper-slide">
+                <blockquote class="twitter-tweet">
+                    <p lang="pt" dir="ltr">Quer saber o que o <a
+                            href="https://twitter.com/FalleNCS?ref_src=twsrc%5Etfw">@FalleNCS</a> passou no pause
+                        tático? <a href="https://twitter.com/hashtag/iem?src=hash&amp;ref_src=twsrc%5Etfw">#iem</a>
+                        <a
+                            href="https://twitter.com/hashtag/ConfiaNoVerdadeiro?src=hash&amp;ref_src=twsrc%5Etfw">#ConfiaNoVerdadeiro</a>
+                        <a href="https://t.co/FkAr1TgipJ">pic.twitter.com/FkAr1TgipJ</a>
+                    </p>&mdash; Dust2 Brasil
+                    🇧🇷 (@dust2_br) <a
+                        href="https://twitter.com/dust2_br/status/1579188511844233217?ref_src=twsrc%5Etfw">October
+                        9, 2022</a>
+                </blockquote>
+                <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
             </div>
+
+
+
+
+            <div class="swiper-slide">
+                <blockquote class="twitter-tweet">
+                    <p lang="zxx" dir="ltr"><a href="https://t.co/IrAx1gxll9">pic.twitter.com/IrAx1gxll9</a></p>
+                    &mdash; jrgandara (@jrgandara) <a
+                        href="https://twitter.com/jrgandara/status/1578367300830253056?ref_src=twsrc%5Etfw">October
+                        7, 2022</a>
+                </blockquote>
+                <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+            </div>
+            <div class="swiper-slide">Slide 3</div>
+            <div class="swiper-slide">Slide 4</div>
+            <div class="swiper-slide">Slide 5</div>
+            <div class="swiper-slide">Slide 6</div>
+            <div class="swiper-slide">Slide 7</div>
+            <div class="swiper-slide">Slide 8</div>
+            <div class="swiper-slide">Slide 9</div>
         </div>
     </div>
+
+    <!-- Swiper JS -->
+    <script src="https://cdn.jsdelivr.net/npm/swiper/swiper-bundle.min.js"></script>
+
+    <!-- Initialize Swiper -->
+    <script>
+
+        var swiper4 = new Swiper(".mySwiper4", {
+            grabCursor: true,
+            effect: "creative",
+            direction: 'vertical',
+            creativeEffect: {
+                prev: {
+                    shadow: true,
+                    translate: [0, 0, -800],
+                    rotate: [180, 0, 0],
+                },
+                next: {
+                    shadow: true,
+                    translate: [0, 0, -800],
+                    rotate: [-180, 0, 0],
+                },
+            },
+        });
+
+    </script>
 </body>
 
 </html>
