@@ -6,8 +6,9 @@ const CACHE_TTL_MS = 2 * 60 * 60 * 1000;
 const OG_TIMEOUT_MS = 2000;
 const MAX_OG_SCRAPES = 5;
 const PLACEHOLDER = 'https://placehold.co/1080x1920.png';
+const DEFAULT_PAGE_SIZE = 20;
 
-// --- XML helpers ---
+// ─── XML helpers ────────────────────────────────────────────────────────────
 
 function getXmlText(field: any): string {
   if (field == null) return '';
@@ -35,8 +36,7 @@ function getLinkUrl(field: any): string {
 }
 
 function extractFirstImg(html: string): string | null {
-  const m = html?.match(/<img[^>]+src="([^">]+)"/);
-  return m?.[1] || null;
+  return html?.match(/<img[^>]+src="([^">]+)"/)?.[1] || null;
 }
 
 function stripHtml(html: string): string {
@@ -58,7 +58,7 @@ function normalizeCategory(raw: string): string {
   return map[raw.toLowerCase()] ?? raw.toLowerCase();
 }
 
-// --- OG image scraping ---
+// ─── OG Image scraping ──────────────────────────────────────────────────────
 
 async function scrapeOgImage(url: string): Promise<string | null> {
   try {
@@ -72,30 +72,62 @@ async function scrapeOgImage(url: string): Promise<string | null> {
     clearTimeout(timer);
     if (!res.ok) return null;
     const html = await res.text();
-    const m =
-      html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
-      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i) ||
-      html.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i);
-    return m?.[1] || null;
+    return (
+      html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)?.[1] ||
+      html.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
+      null
+    );
   } catch {
     return null;
   }
 }
 
-// --- Media URL extraction ---
+// Executa OG scraping para artigos sem imagem de um feed (chamado em background)
+export async function scrapeImagesForFeed(feedUrl: string): Promise<void> {
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { data } = await supabase
+      .from('articles')
+      .select('id, original_url')
+      .eq('feed_url', feedUrl)
+      .eq('image_url', PLACEHOLDER)
+      .gt('published_at', thirtyDaysAgo)
+      .limit(MAX_OG_SCRAPES);
+
+    if (!data || data.length === 0) return;
+
+    const results = await Promise.all(
+      data.map(async (row: any) => ({
+        id: row.id,
+        imageUrl: await scrapeOgImage(row.original_url),
+      }))
+    );
+
+    for (const { id, imageUrl } of results) {
+      if (imageUrl) {
+        await supabase.from('articles').update({ image_url: imageUrl }).eq('id', id);
+      }
+    }
+  } catch (e) {
+    console.error('[feedService] scrapeImagesForFeed error:', e);
+  }
+}
+
+// ─── Media URL extraction ────────────────────────────────────────────────────
 
 function findMediaUrl(elements: any): string | null {
   if (!elements) return null;
   const list = Array.isArray(elements) ? elements : [elements];
   for (const m of list) {
-    if (m?.url) {
-      if (!m.type || m.type.startsWith('image') || m.medium === 'image') return m.url;
+    if (m?.url && (!m.type || m.type.startsWith('image') || m.medium === 'image')) {
+      return m.url;
     }
   }
   return null;
 }
 
-// --- Item parser ---
+// ─── RSS Item parser ─────────────────────────────────────────────────────────
 
 function parseItem(item: any, feedTitle: string, feedUrl: string): NewsArticle {
   const title = getXmlText(item.title) || getXmlText(item['dc:title']) || 'Sem título';
@@ -161,11 +193,10 @@ function parseItem(item: any, feedTitle: string, feedUrl: string): NewsArticle {
   };
 }
 
-// --- RSS parser ---
+// ─── RSS Feed parser ─────────────────────────────────────────────────────────
 
 async function parseRss(xmlText: string, feedUrl: string): Promise<NewsArticle[]> {
   const parsed = await parseStringPromise(xmlText, { explicitArray: true, mergeAttrs: true });
-
   let items: any[] = [];
   let feedTitle = 'Notícias';
 
@@ -180,7 +211,7 @@ async function parseRss(xmlText: string, feedUrl: string): Promise<NewsArticle[]
   return items.map((item: any) => parseItem(item, feedTitle, feedUrl));
 }
 
-// --- Supabase cache ---
+// ─── Supabase row → NewsArticle ──────────────────────────────────────────────
 
 function rowToArticle(row: any): NewsArticle {
   return {
@@ -200,22 +231,7 @@ function rowToArticle(row: any): NewsArticle {
   };
 }
 
-async function getCached(feedUrl: string): Promise<NewsArticle[] | null> {
-  try {
-    const { data, error } = await supabase
-      .from('articles')
-      .select('*')
-      .eq('feed_url', feedUrl)
-      .gt('expires_at', new Date().toISOString())
-      .order('published_at', { ascending: false })
-      .limit(30);
-
-    if (error || !data || data.length === 0) return null;
-    return data.map(rowToArticle);
-  } catch {
-    return null;
-  }
-}
+// ─── Supabase write ──────────────────────────────────────────────────────────
 
 async function upsertArticles(articles: NewsArticle[]): Promise<void> {
   if (articles.length === 0) return;
@@ -241,85 +257,132 @@ async function upsertArticles(articles: NewsArticle[]): Promise<void> {
   try {
     await supabase.from('articles').upsert(rows, { onConflict: 'id' });
   } catch (e) {
-    console.error('[feedService] Supabase upsert error:', e);
+    console.error('[feedService] upsert error:', e);
   }
 }
 
-export async function updateArticleSummary(
-  articleId: string,
-  summary: string
-): Promise<void> {
+export async function updateArticleSummary(articleId: string, summary: string): Promise<void> {
   try {
     await supabase
       .from('articles')
       .update({ ai_summary: summary, is_ai_summary: true })
       .eq('id', articleId);
   } catch (e) {
-    console.error('[feedService] Failed to update summary:', e);
+    console.error('[feedService] updateArticleSummary error:', e);
   }
 }
 
-// --- Public API ---
+// ─── Supabase cache read (paginado) ──────────────────────────────────────────
 
-export async function fetchFeedArticles(feedUrl: string): Promise<NewsArticle[]> {
-  const cached = await getCached(feedUrl);
-  if (cached) return cached;
+export interface ArticlePage {
+  articles: NewsArticle[];
+  hasMore: boolean;
+  staleFeeds: string[]; // feeds sem cache fresco
+}
+
+export async function getArticlesFromCache(params: {
+  feedUrls: string[];
+  cursor?: string; // published_at do último artigo visto (para paginar)
+  limit?: number;
+}): Promise<ArticlePage> {
+  const { feedUrls, cursor, limit = DEFAULT_PAGE_SIZE } = params;
+  if (feedUrls.length === 0) return { articles: [], hasMore: false, staleFeeds: [] };
 
   try {
-    const res = await fetch(feedUrl, {
-      headers: { 'User-Agent': 'FlippyApp/1.0' },
-      cache: 'no-store',
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // 1. Quais feeds têm cache fresco?
+    const { data: freshCheck, error: freshErr } = await supabase
+      .from('articles')
+      .select('feed_url')
+      .in('feed_url', feedUrls)
+      .gt('expires_at', new Date().toISOString());
 
-    const xml = await res.text();
-    const articles = await parseRss(xml, feedUrl);
+    if (freshErr) throw freshErr;
 
-    // OG scrape somente para artigos recentes (< 30 dias) sem imagem
-    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    const noImage = articles.filter(a => {
-      if (a.imageUrl !== PLACEHOLDER) return false;
-      if (a.originalUrl === '#') return false;
-      if (a.publishedAt && new Date(a.publishedAt).getTime() < thirtyDaysAgo) return false;
-      return true;
-    });
-    if (noImage.length > 0) {
-      const targets = noImage.slice(0, MAX_OG_SCRAPES);
-      const imgs = await Promise.all(targets.map(a => scrapeOgImage(a.originalUrl)));
-      imgs.forEach((img, i) => {
-        if (img) {
-          const art = articles.find(a => a.id === targets[i].id);
-          if (art) art.imageUrl = img;
-        }
-      });
+    const freshFeeds = [...new Set((freshCheck || []).map((r: any) => r.feed_url as string))];
+    const staleFeeds = feedUrls.filter(url => !freshFeeds.includes(url));
+
+    if (freshFeeds.length === 0) {
+      return { articles: [], hasMore: false, staleFeeds };
     }
 
-    await upsertArticles(articles);
-    return articles;
+    // 2. Query paginada: todos os feeds frescos de uma vez
+    let query = supabase
+      .from('articles')
+      .select('*')
+      .in('feed_url', freshFeeds)
+      .gt('expires_at', new Date().toISOString())
+      .order('published_at', { ascending: false })
+      .limit(limit + 1); // +1 para saber se há mais
+
+    if (cursor) {
+      query = query.lt('published_at', cursor);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const rows = data || [];
+    const hasMore = rows.length > limit;
+    const articles = rows.slice(0, limit).map(rowToArticle);
+
+    return { articles, hasMore, staleFeeds };
   } catch (e) {
-    console.error(`[feedService] Error fetching ${feedUrl}:`, e);
-    return [];
+    console.error('[feedService] getArticlesFromCache error:', e);
+    // Falha no Supabase: marca todos os feeds como stale para fetch direto
+    return { articles: [], hasMore: false, staleFeeds: feedUrls };
   }
+}
+
+// ─── RSS fetch e refresh ─────────────────────────────────────────────────────
+
+async function fetchOneFeed(feedUrl: string): Promise<NewsArticle[]> {
+  const res = await fetch(feedUrl, {
+    headers: { 'User-Agent': 'FlippyApp/1.0' },
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const xml = await res.text();
+  return parseRss(xml, feedUrl);
+}
+
+// Atualiza feeds stale no Supabase (sem OG scraping — isso vai em background separado)
+export async function refreshFeeds(feedUrls: string[]): Promise<void> {
+  if (feedUrls.length === 0) return;
+
+  const results = await Promise.allSettled(feedUrls.map(url => fetchOneFeed(url)));
+
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (result.status === 'fulfilled' && result.value.length > 0) {
+      await upsertArticles(result.value);
+    } else if (result.status === 'rejected') {
+      console.error(`[feedService] refreshFeeds failed for ${feedUrls[i]}:`, result.reason);
+    }
+  }
+}
+
+// Compatibilidade com código legado
+export async function fetchFeedArticles(feedUrl: string): Promise<NewsArticle[]> {
+  const { articles, staleFeeds } = await getArticlesFromCache({ feedUrls: [feedUrl] });
+  if (articles.length > 0) return articles;
+  if (staleFeeds.length > 0) {
+    await refreshFeeds(staleFeeds);
+    const fresh = await getArticlesFromCache({ feedUrls: [feedUrl] });
+    return fresh.articles;
+  }
+  return [];
 }
 
 export async function fetchMultipleFeedsArticles(
   feeds: Array<{ url: string; name: string }>
 ): Promise<NewsArticle[]> {
-  const results = await Promise.allSettled(feeds.map(f => fetchFeedArticles(f.url)));
-
-  const seen = new Set<string>();
-  const articles = results
-    .filter((r): r is PromiseFulfilledResult<NewsArticle[]> => r.status === 'fulfilled')
-    .flatMap(r => r.value)
-    .filter(a => {
-      if (seen.has(a.id)) return false;
-      seen.add(a.id);
-      return true;
-    });
-
-  return articles.sort((a, b) => {
-    const tA = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
-    const tB = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
-    return tB - tA;
-  });
+  const feedUrls = feeds.map(f => f.url);
+  const { articles, staleFeeds } = await getArticlesFromCache({ feedUrls });
+  if (articles.length > 0) return articles;
+  if (staleFeeds.length > 0) {
+    await refreshFeeds(staleFeeds);
+    const fresh = await getArticlesFromCache({ feedUrls });
+    return fresh.articles;
+  }
+  return [];
 }

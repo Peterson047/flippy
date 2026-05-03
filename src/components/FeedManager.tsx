@@ -1,14 +1,17 @@
-
-"use client";
+'use client';
 
 import { useState } from 'react';
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter, SheetClose } from "@/components/ui/sheet";
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle,
+  SheetDescription, SheetFooter, SheetClose,
+} from '@/components/ui/sheet';
+import { Badge } from '@/components/ui/badge';
 import type { FeedSource } from '@/types';
-import { PlusCircle, Trash2, Search, RotateCw, Eye, EyeOff, ListChecks } from 'lucide-react';
+import { PlusCircle, Trash2, Search, RotateCw, Eye, EyeOff, ListChecks, Link, Globe } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { findRssFeed, type FindRssFeedOutput } from '@/ai/flows/find-rss-feed-flow';
+import { discoverFeed, type FeedSuggestion } from '@/app/actions';
 
 interface FeedManagerProps {
   isOpen: boolean;
@@ -19,37 +22,35 @@ interface FeedManagerProps {
   onSeenArticleIdsChange: (ids: string[]) => void;
 }
 
-export default function FeedManager({ 
-  isOpen, 
-  onOpenChange, 
-  feedSources, 
+export default function FeedManager({
+  isOpen,
+  onOpenChange,
+  feedSources,
   onFeedSourcesChange,
   seenArticleIds,
-  onSeenArticleIdsChange
+  onSeenArticleIdsChange,
 }: FeedManagerProps) {
   const [newFeedName, setNewFeedName] = useState('');
   const [newFeedUrl, setNewFeedUrl] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [isSearchingFeed, setIsSearchingFeed] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [suggestions, setSuggestions] = useState<FeedSuggestion[]>([]);
+  const [searchDone, setSearchDone] = useState(false);
   const { toast } = useToast();
 
   const handleAddFeed = () => {
     if (!newFeedName.trim() || !newFeedUrl.trim()) {
-      toast({
-        title: "Erro",
-        description: "Por favor, insira um nome e uma URL para o feed.",
-        variant: "destructive",
-      });
+      toast({ title: 'Preencha o nome e a URL do feed.', variant: 'destructive' });
       return;
     }
     try {
       new URL(newFeedUrl);
-    } catch (_) {
-      toast({
-        title: "URL Inválida",
-        description: "Por favor, insira uma URL válida para o feed.",
-        variant: "destructive",
-      });
+    } catch {
+      toast({ title: 'URL inválida', description: 'Insira uma URL completa (ex: https://...)', variant: 'destructive' });
+      return;
+    }
+    if (feedSources.some(f => f.url === newFeedUrl.trim())) {
+      toast({ title: 'Feed já existe', description: 'Este feed já está na sua lista.', variant: 'destructive' });
       return;
     }
 
@@ -62,200 +63,242 @@ export default function FeedManager({
     onFeedSourcesChange([...feedSources, newFeed]);
     setNewFeedName('');
     setNewFeedUrl('');
-    toast({
-      title: "Feed Adicionado",
-      description: `"${newFeed.name}" foi adicionado.`,
-    });
+    toast({ title: 'Feed adicionado', description: `"${newFeed.name}" foi adicionado.` });
   };
 
   const handleRemoveFeed = (id: string) => {
-    onFeedSourcesChange(feedSources.filter(feed => feed.id !== id));
-    toast({
-      title: "Feed Removido",
-      description: "A fonte do feed foi removida.",
-    });
+    onFeedSourcesChange(feedSources.filter(f => f.id !== id));
+    toast({ title: 'Feed removido.' });
   };
 
-  const handleToggleFeedVisibility = (id: string) => {
-    const updatedFeeds = feedSources.map(feed => 
-      feed.id === id ? { ...feed, isHidden: !feed.isHidden } : feed
-    );
-    onFeedSourcesChange(updatedFeeds);
-    const targetFeed = updatedFeeds.find(f => f.id === id);
-    toast({
-      title: `Feed ${targetFeed?.isHidden ? "Oculto" : "Visível"}`,
-      description: `"${targetFeed?.name}" agora está ${targetFeed?.isHidden ? "oculto" : "visível"}.`,
-    });
+  const handleToggleVisibility = (id: string) => {
+    const updated = feedSources.map(f => f.id === id ? { ...f, isHidden: !f.isHidden } : f);
+    onFeedSourcesChange(updated);
+    const feed = updated.find(f => f.id === id);
+    toast({ title: feed?.isHidden ? 'Feed oculto' : 'Feed visível', description: `"${feed?.name}"` });
   };
 
-  const handleSearchFeed = async () => {
+  const handleDiscover = async () => {
     if (!searchQuery.trim()) {
-      toast({
-        title: "Busca Inválida",
-        description: "Por favor, insira um tópico para buscar.",
-        variant: "destructive",
-      });
+      toast({ title: 'Digite um tópico ou URL para buscar.', variant: 'destructive' });
       return;
     }
 
-    setIsSearchingFeed(true);
-    toast({
-      title: "Buscando Feed com IA...",
-      description: `Procurando por feeds sobre "${searchQuery}". Leva alguns segundos...`,
-    });
+    setIsSearching(true);
+    setSuggestions([]);
+    setSearchDone(false);
 
     try {
-      const result: FindRssFeedOutput = await findRssFeed({ query: searchQuery });
-      if (result.found && result.suggestedName && result.suggestedUrl) {
-        setNewFeedName(result.suggestedName);
-        setNewFeedUrl(result.suggestedUrl);
-        toast({
-          title: "Feed Encontrado pela IA!",
-          description: "Os campos de nome e URL foram preenchidos. Verifique e clique em 'Adicionar Feed'.",
-          variant: "default",
-        });
-      } else {
-        toast({
-          title: "Nenhum Feed Encontrado",
-          description: "A IA não encontrou um feed RSS para este tópico. Tente uma busca diferente ou adicione manualmente.",
-          variant: "default",
-        });
-      }
-    } catch (error) {
-      console.error("Error searching for feed:", error);
-      let errorMessage = "Ocorreu um erro ao buscar o feed com a IA. Tente novamente mais tarde.";
-      if (error instanceof Error && (error.message.includes('429') || error.message.toLowerCase().includes('quota') || error.message.toLowerCase().includes('rate limit'))) {
-          errorMessage = "A busca por feed com IA está indisponível devido a limites da API. Por favor, tente novamente mais tarde ou adicione manualmente.";
-      }
-      toast({
-        title: "Erro na Busca com IA",
-        description: errorMessage,
-        variant: "destructive",
-      });
+      const results = await discoverFeed(searchQuery);
+      setSuggestions(results);
+      setSearchDone(true);
+    } catch {
+      toast({ title: 'Erro ao buscar feed.', description: 'Tente novamente mais tarde.', variant: 'destructive' });
+      setSearchDone(true);
     } finally {
-      setIsSearchingFeed(false);
+      setIsSearching(false);
     }
   };
 
-  const handleClearSeenHistory = () => {
-    onSeenArticleIdsChange([]);
-    toast({
-      title: "Histórico Limpo",
-      description: "Todas as marcações de notícias vistas foram removidas.",
-    });
+  const handleAddSuggestion = (suggestion: FeedSuggestion) => {
+    if (feedSources.some(f => f.url === suggestion.url)) {
+      toast({ title: 'Feed já existe', description: `"${suggestion.name}" já está na sua lista.`, variant: 'destructive' });
+      return;
+    }
+    onFeedSourcesChange([...feedSources, {
+      id: Date.now().toString(),
+      name: suggestion.name,
+      url: suggestion.url,
+      isHidden: false,
+    }]);
+    setSuggestions(prev => prev.filter(s => s.url !== suggestion.url));
+    toast({ title: 'Feed adicionado', description: `"${suggestion.name}" foi adicionado.` });
   };
+
+  const handleClearHistory = () => {
+    onSeenArticleIdsChange([]);
+    toast({ title: 'Histórico limpo', description: 'Todas as notícias voltarão a aparecer.' });
+  };
+
+  const visibleCount = feedSources.filter(f => !f.isHidden).length;
 
   return (
     <Sheet open={isOpen} onOpenChange={onOpenChange}>
       <SheetContent className="bg-card text-card-foreground w-full sm:max-w-lg flex flex-col">
         <SheetHeader className="p-6 border-b border-border">
-          <SheetTitle className="font-headline text-2xl">Gerenciar Fontes e Histórico</SheetTitle>
+          <SheetTitle className="font-headline text-2xl">Configurações</SheetTitle>
           <SheetDescription>
-            Adicione, remova, oculte feeds ou limpe seu histórico de notícias vistas.
+            Gerencie seus feeds e histórico de leitura.
           </SheetDescription>
         </SheetHeader>
-        
+
         <div className="flex-grow p-6 space-y-6 overflow-y-auto no-scrollbar">
-          <div className="space-y-4 p-4 border border-border rounded-lg shadow">
-            <h3 className="font-headline text-lg font-semibold">Encontrar Feed por Tópico (IA)</h3>
-            <div className="flex gap-2 items-center">
-              <Input
-                type="text"
-                placeholder="Ex: Tecnologia no Brasil"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-input text-foreground placeholder:text-muted-foreground flex-grow"
-                disabled={isSearchingFeed}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !isSearchingFeed && searchQuery.trim()) handleSearchFeed(); }}
-              />
-              <Button 
-                onClick={handleSearchFeed} 
-                disabled={isSearchingFeed || !searchQuery.trim()} 
-                className="bg-primary hover:bg-primary/90 text-primary-foreground px-3"
-                aria-label="Buscar feed com IA"
-              >
-                {isSearchingFeed ? <RotateCw className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                <span className="ml-2 hidden xs:inline">Buscar</span>
-              </Button>
+
+          {/* Descobrir feed */}
+          <div className="space-y-3 p-4 border border-border rounded-lg">
+            <div className="flex items-center gap-2">
+              <Globe className="h-4 w-4 text-primary" />
+              <h3 className="font-headline text-base font-semibold">Encontrar Feed</h3>
             </div>
             <p className="text-xs text-muted-foreground">
-              A IA tentará encontrar um feed RSS relevante. Os resultados podem variar.
+              Cole uma URL de site/feed ou escreva um tópico (ex: "futebol", "tecnologia", "BBC Brasil").
             </p>
+            <div className="flex gap-2">
+              <Input
+                placeholder="tecnologia, g1.globo.com, https://..."
+                value={searchQuery}
+                onChange={e => { setSearchQuery(e.target.value); setSuggestions([]); setSearchDone(false); }}
+                className="bg-input text-foreground placeholder:text-muted-foreground flex-grow"
+                disabled={isSearching}
+                onKeyDown={e => { if (e.key === 'Enter' && !isSearching) handleDiscover(); }}
+              />
+              <Button
+                onClick={handleDiscover}
+                disabled={isSearching || !searchQuery.trim()}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground px-3 shrink-0"
+              >
+                {isSearching ? <RotateCw className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              </Button>
+            </div>
+
+            {/* Sugestões */}
+            {isSearching && (
+              <div className="text-xs text-muted-foreground text-center py-2 animate-pulse">
+                Buscando feeds compatíveis...
+              </div>
+            )}
+
+            {!isSearching && searchDone && suggestions.length === 0 && (
+              <div className="text-xs text-muted-foreground text-center py-2">
+                Nenhum feed compatível encontrado. Tente outro termo ou cole a URL do feed.
+              </div>
+            )}
+
+            {suggestions.length > 0 && (
+              <ul className="space-y-2 pt-1">
+                {suggestions.map(s => {
+                  const alreadyAdded = feedSources.some(f => f.url === s.url);
+                  return (
+                    <li
+                      key={s.url}
+                      className="flex items-center justify-between gap-2 p-2.5 bg-background/60 border border-border/50 rounded-md"
+                    >
+                      <div className="flex-1 overflow-hidden">
+                        <p className="text-sm font-medium text-foreground truncate">{s.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">{s.url}</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={alreadyAdded ? 'secondary' : 'default'}
+                        disabled={alreadyAdded}
+                        onClick={() => handleAddSuggestion(s)}
+                        className="shrink-0 text-xs"
+                      >
+                        {alreadyAdded ? 'Adicionado' : '+ Adicionar'}
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
 
-          <div className="space-y-4 p-4 border border-border rounded-lg shadow">
-            <h3 className="font-headline text-lg font-semibold">Adicionar Novo Feed Manualmente</h3>
+          {/* Adicionar feed manualmente */}
+          <div className="space-y-3 p-4 border border-border rounded-lg">
+            <div className="flex items-center gap-2">
+              <Link className="h-4 w-4 text-primary" />
+              <h3 className="font-headline text-base font-semibold">Adicionar Manualmente</h3>
+            </div>
             <Input
-              type="text"
-              placeholder="Nome do Feed (Ex: G1 - Brasil)"
+              placeholder="Nome (ex: G1 Brasil)"
               value={newFeedName}
-              onChange={(e) => setNewFeedName(e.target.value)}
+              onChange={e => setNewFeedName(e.target.value)}
               className="bg-input text-foreground placeholder:text-muted-foreground"
             />
             <Input
               type="url"
-              placeholder="URL do Feed (Ex: https://g1.globo.com/...)"
+              placeholder="URL do feed RSS (https://...)"
               value={newFeedUrl}
-              onChange={(e) => setNewFeedUrl(e.target.value)}
+              onChange={e => setNewFeedUrl(e.target.value)}
               className="bg-input text-foreground placeholder:text-muted-foreground"
+              onKeyDown={e => { if (e.key === 'Enter') handleAddFeed(); }}
             />
             <Button onClick={handleAddFeed} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
               <PlusCircle className="mr-2 h-4 w-4" /> Adicionar Feed
             </Button>
           </div>
 
-          <div className="space-y-4 p-4 border border-border rounded-lg shadow">
-            <h3 className="font-headline text-lg font-semibold">Histórico de Visualização</h3>
-            <Button 
-              onClick={handleClearSeenHistory} 
-              variant="outline" 
+          {/* Histórico */}
+          <div className="space-y-3 p-4 border border-border rounded-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ListChecks className="h-4 w-4 text-primary" />
+                <h3 className="font-headline text-base font-semibold">Histórico de Leitura</h3>
+              </div>
+              {seenArticleIds.length > 0 && (
+                <Badge variant="secondary">{seenArticleIds.length} lidas</Badge>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Notícias já vistas ficam marcadas para não aparecerem novamente. O histórico é salvo no seu dispositivo.
+            </p>
+            <Button
+              onClick={handleClearHistory}
+              variant="outline"
               className="w-full"
               disabled={seenArticleIds.length === 0}
             >
-              <ListChecks className="mr-2 h-4 w-4" /> 
-              Limpar {seenArticleIds.length} Notícia(s) Vista(s)
+              Limpar Histórico
             </Button>
-            <p className="text-xs text-muted-foreground">
-              Notícias marcadas como vistas não serão exibidas novamente até que o histórico seja limpo.
-            </p>
           </div>
 
-          <div className="space-y-4">
-            <h3 className="font-headline text-lg font-semibold">Feeds Atuais</h3>
+          {/* Lista de feeds */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-headline text-base font-semibold">Meus Feeds</h3>
+              <span className="text-xs text-muted-foreground">
+                {visibleCount} ativo{visibleCount !== 1 ? 's' : ''}
+              </span>
+            </div>
+
             {feedSources.length === 0 ? (
-              <p className="text-muted-foreground text-sm">Nenhum feed adicionado ainda.</p>
+              <p className="text-muted-foreground text-sm text-center py-4">
+                Nenhum feed adicionado ainda.
+              </p>
             ) : (
-              <ul className="space-y-3">
+              <ul className="space-y-2">
                 {feedSources.map(feed => (
-                  <li 
-                    key={feed.id} 
-                    className={`flex items-center justify-between p-3 bg-background/50 rounded-md shadow-sm transition-opacity ${feed.isHidden ? 'opacity-60' : 'opacity-100'}`}
+                  <li
+                    key={feed.id}
+                    className={`flex items-center justify-between p-3 bg-background/50 rounded-md border border-border/50 transition-opacity ${feed.isHidden ? 'opacity-50' : 'opacity-100'}`}
                   >
-                    <div className="flex-1 overflow-hidden">
-                      <p 
-                        className={`font-medium text-foreground truncate ${feed.isHidden ? 'line-through' : ''}`} 
+                    <div className="flex-1 overflow-hidden mr-2">
+                      <p
+                        className={`font-medium text-sm text-foreground truncate ${feed.isHidden ? 'line-through' : ''}`}
                         title={feed.name}
                       >
                         {feed.name}
                       </p>
-                      <p className="text-xs text-muted-foreground truncate" title={feed.url}>{feed.url}</p>
+                      <p className="text-xs text-muted-foreground truncate" title={feed.url}>
+                        {feed.url}
+                      </p>
                     </div>
-                    <div className="flex items-center ml-2">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        onClick={() => handleToggleFeedVisibility(feed.id)} 
-                        className="text-muted-foreground hover:text-foreground hover:bg-white/10 flex-shrink-0"
-                        aria-label={feed.isHidden ? `Mostrar feed ${feed.name}` : `Ocultar feed ${feed.name}`}
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleToggleVisibility(feed.id)}
+                        className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-white/10"
+                        aria-label={feed.isHidden ? 'Mostrar feed' : 'Ocultar feed'}
                       >
                         {feed.isHidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        onClick={() => handleRemoveFeed(feed.id)} 
-                        className="text-destructive hover:bg-destructive/10 flex-shrink-0"
-                        aria-label={`Remover feed ${feed.name}`}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleRemoveFeed(feed.id)}
+                        className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                        aria-label="Remover feed"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -276,4 +319,3 @@ export default function FeedManager({
     </Sheet>
   );
 }
-
