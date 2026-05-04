@@ -1,5 +1,6 @@
 import { parseStringPromise } from 'xml2js';
-import { supabase } from '@/lib/supabase';
+import { supabase, supabaseAdmin } from '@/lib/supabase';
+import { validateExternalUrl } from '@/lib/security';
 import type { NewsArticle } from '@/types';
 
 const CACHE_TTL_MS = 2 * 60 * 60 * 1000;
@@ -61,6 +62,7 @@ function normalizeCategory(raw: string): string {
 // ─── OG Image scraping ──────────────────────────────────────────────────────
 
 async function scrapeOgImage(url: string): Promise<string | null> {
+  if (!validateExternalUrl(url).ok) return null;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), OG_TIMEOUT_MS);
@@ -106,7 +108,11 @@ export async function scrapeImagesForFeed(feedUrl: string): Promise<void> {
 
     for (const { id, imageUrl } of results) {
       if (imageUrl) {
-        await supabase.from('articles').update({ image_url: imageUrl }).eq('id', id);
+        const { error } = await supabaseAdmin
+          .from('articles')
+          .update({ image_url: imageUrl })
+          .eq('id', id);
+        if (error) console.error('[feedService] image update error:', error.message);
       }
     }
   } catch (e) {
@@ -254,22 +260,23 @@ async function upsertArticles(articles: NewsArticle[]): Promise<void> {
     is_ai_summary: a.isAiSummary || false,
   }));
 
-  try {
-    await supabase.from('articles').upsert(rows, { onConflict: 'id' });
-  } catch (e) {
-    console.error('[feedService] upsert error:', e);
+  // Supabase JS v2 retorna { error } em vez de lançar exceção
+  const { error } = await supabaseAdmin
+    .from('articles')
+    .upsert(rows, { onConflict: 'id' });
+
+  if (error) {
+    console.error('[feedService] upsert error:', error.message, error.details ?? '');
+    throw new Error(error.message);
   }
 }
 
 export async function updateArticleSummary(articleId: string, summary: string): Promise<void> {
-  try {
-    await supabase
-      .from('articles')
-      .update({ ai_summary: summary, is_ai_summary: true })
-      .eq('id', articleId);
-  } catch (e) {
-    console.error('[feedService] updateArticleSummary error:', e);
-  }
+  const { error } = await supabaseAdmin
+    .from('articles')
+    .update({ ai_summary: summary, is_ai_summary: true })
+    .eq('id', articleId);
+  if (error) console.error('[feedService] updateArticleSummary error:', error.message);
 }
 
 // ─── Supabase cache read (paginado) ──────────────────────────────────────────
@@ -336,29 +343,49 @@ export async function getArticlesFromCache(params: {
 // ─── RSS fetch e refresh ─────────────────────────────────────────────────────
 
 async function fetchOneFeed(feedUrl: string): Promise<NewsArticle[]> {
-  const res = await fetch(feedUrl, {
-    headers: { 'User-Agent': 'FlippyApp/1.0' },
-    cache: 'no-store',
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const xml = await res.text();
-  return parseRss(xml, feedUrl);
+  const ssrf = validateExternalUrl(feedUrl);
+  if (!ssrf.ok) throw new Error(`URL bloqueada: ${ssrf.reason}`);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(feedUrl, {
+      headers: { 'User-Agent': 'FlippyApp/1.0' },
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const xml = await res.text();
+    return parseRss(xml, feedUrl);
+  } catch (e) {
+    clearTimeout(timer);
+    throw e;
+  }
 }
 
-// Atualiza feeds stale no Supabase (sem OG scraping — isso vai em background separado)
-export async function refreshFeeds(feedUrls: string[]): Promise<void> {
-  if (feedUrls.length === 0) return;
+// Atualiza feeds stale e retorna os artigos obtidos.
+// Persiste no Supabase de forma fire-and-forget (não bloqueia em caso de falha).
+export async function refreshFeeds(feedUrls: string[]): Promise<NewsArticle[]> {
+  if (feedUrls.length === 0) return [];
 
   const results = await Promise.allSettled(feedUrls.map(url => fetchOneFeed(url)));
+  const fetched: NewsArticle[] = [];
 
   for (let i = 0; i < results.length; i++) {
     const result = results[i];
     if (result.status === 'fulfilled' && result.value.length > 0) {
-      await upsertArticles(result.value);
+      fetched.push(...result.value);
+      // Persiste em background — falha silenciosa se Supabase indisponível
+      upsertArticles(result.value).catch(e =>
+        console.error(`[feedService] upsert failed for ${feedUrls[i]}:`, e)
+      );
     } else if (result.status === 'rejected') {
-      console.error(`[feedService] refreshFeeds failed for ${feedUrls[i]}:`, result.reason);
+      console.error(`[feedService] fetch failed for ${feedUrls[i]}:`, result.reason);
     }
   }
+
+  return fetched;
 }
 
 // Compatibilidade com código legado

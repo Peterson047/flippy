@@ -1,6 +1,7 @@
 'use server';
 
 import { after } from 'next/server';
+import { headers } from 'next/headers';
 import { z } from 'genkit';
 import { ai } from '@/ai/genkit';
 import type { NewsArticle } from '@/types';
@@ -10,6 +11,17 @@ import {
   scrapeImagesForFeed,
   updateArticleSummary,
 } from '@/services/feedService';
+import { checkRateLimit } from '@/lib/rateLimit';
+import { validateExternalUrl, truncate, LIMITS } from '@/lib/security';
+
+async function getClientIp(): Promise<string> {
+  const h = await headers();
+  return (
+    h.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    h.get('x-real-ip') ||
+    'unknown'
+  );
+}
 
 // ─── Artigos paginados ───────────────────────────────────────────────────────
 
@@ -22,7 +34,23 @@ export async function fetchArticlesBatch(params: {
   feedUrls: string[];
   cursor?: string;
 }): Promise<ArticleBatch> {
-  const { feedUrls, cursor } = params;
+  const ip = await getClientIp();
+
+  // Rate limit: 60 req/min por IP
+  const rl = checkRateLimit(`feeds:${ip}`, 60, 60_000);
+  if (!rl.allowed) return { articles: [], hasMore: false };
+
+  // Validações de input
+  const rawUrls = Array.isArray(params.feedUrls) ? params.feedUrls : [];
+  const feedUrls = rawUrls
+    .slice(0, LIMITS.FEEDS_PER_BATCH)
+    .filter(u => typeof u === 'string' && validateExternalUrl(u).ok);
+
+  const cursor = typeof params.cursor === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(params.cursor)
+    ? params.cursor
+    : undefined;
+
+  if (feedUrls.length === 0) return { articles: [], hasMore: false };
 
   const { articles, hasMore, staleFeeds } = await getArticlesFromCache({
     feedUrls,
@@ -30,30 +58,50 @@ export async function fetchArticlesBatch(params: {
     limit: 20,
   });
 
-  // Supabase vazio na primeira carga: fetch síncrono
-  if (articles.length === 0 && !cursor && staleFeeds.length > 0) {
-    await refreshFeeds(staleFeeds);
-    // Scraping de OG em background após popular o Supabase
-    after(async () => {
-      for (const url of staleFeeds) {
-        await scrapeImagesForFeed(url);
+  // Supabase tem dados frescos → retorna imediatamente e atualiza feeds stale em background
+  if (articles.length > 0) {
+    if (staleFeeds.length > 0) {
+      try {
+        after(async () => {
+          await refreshFeeds(staleFeeds);
+          for (const url of staleFeeds) await scrapeImagesForFeed(url);
+        });
+      } catch {
+        // after() indisponível neste ambiente — ignora
       }
-    });
-    const fresh = await getArticlesFromCache({ feedUrls, limit: 20 });
-    return { articles: fresh.articles, hasMore: fresh.hasMore };
+    }
+    return { articles, hasMore };
   }
 
-  // Feeds stale: refresh em background sem bloquear a resposta
+  // Supabase vazio (primeiro deploy, tabela inexistente ou env vars ausentes):
+  // busca RSS diretamente e usa os artigos mesmo que o Supabase não consiga armazená-los
   if (staleFeeds.length > 0) {
-    after(async () => {
-      await refreshFeeds(staleFeeds);
-      for (const url of staleFeeds) {
-        await scrapeImagesForFeed(url);
-      }
-    });
+    const fetched = await refreshFeeds(staleFeeds);
+
+    if (fetched.length > 0) {
+      // Scraping de OG em background (melhor esforço)
+      try {
+        after(async () => {
+          for (const url of staleFeeds) await scrapeImagesForFeed(url);
+        });
+      } catch { /* ignora */ }
+
+      // Deduplica e ordena por data
+      const seen = new Set<string>();
+      const deduped = fetched
+        .filter(a => { if (seen.has(a.id)) return false; seen.add(a.id); return true; })
+        .sort((a, b) => {
+          const tA = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
+          const tB = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
+          return tB - tA;
+        });
+
+      const page = deduped.slice(0, 20);
+      return { articles: page, hasMore: deduped.length > 20 };
+    }
   }
 
-  return { articles, hasMore };
+  return { articles: [], hasMore: false };
 }
 
 // ─── Resumo por IA (fallback para artigos sem description) ───────────────────
@@ -62,13 +110,21 @@ export async function generateSummary(
   articleId: string,
   articleText: string
 ): Promise<{ summary: string; isAi: boolean }> {
-  if (!articleText || articleText.trim().length < 50) {
-    return { summary: '', isAi: false };
-  }
+  const ip = await getClientIp();
+
+  // Rate limit: 15 chamadas Gemini/min por IP (API cara)
+  const rl = checkRateLimit(`gemini:${ip}`, 15, 60_000);
+  if (!rl.allowed) return { summary: '', isAi: false };
+
+  // Validação e truncamento do input
+  if (!articleText || typeof articleText !== 'string') return { summary: '', isAi: false };
+  const safeText = truncate(articleText.trim(), LIMITS.ARTICLE_TEXT_MAX);
+  if (safeText.length < 50) return { summary: '', isAi: false };
+
   try {
     const { output } = await ai.generate({
       model: 'googleai/gemini-2.0-flash',
-      prompt: `Resuma o seguinte artigo de notícia em 5 linhas concisas, em português:\n\n${articleText}`,
+      prompt: `Resuma o seguinte artigo de notícia em 5 linhas concisas, em português:\n\n${safeText}`,
       output: {
         schema: z.object({
           summary: z.string().describe('Resumo de 5 linhas em português'),
@@ -77,7 +133,8 @@ export async function generateSummary(
     });
     const summary = output?.summary?.trim() || '';
     if (summary) {
-      await updateArticleSummary(articleId, summary);
+      const safeId = typeof articleId === 'string' ? articleId.slice(0, 500) : '';
+      if (safeId) await updateArticleSummary(safeId, summary);
       return { summary, isAi: true };
     }
   } catch (e) {
@@ -122,6 +179,8 @@ function searchCurated(query: string): FeedSuggestion[] {
 }
 
 async function tryDirectRss(url: string): Promise<FeedSuggestion | null> {
+  // Valida internamente para proteger qualquer chamador (HTML discovery, AI suggestions, etc.)
+  if (!validateExternalUrl(url).ok) return null;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
@@ -171,12 +230,22 @@ async function aiSuggestFeeds(query: string): Promise<FeedSuggestion[]> {
 }
 
 export async function discoverFeed(input: string): Promise<FeedSuggestion[]> {
-  const trimmed = input.trim();
+  const ip = await getClientIp();
+
+  // Rate limit: 10 req/min por IP (faz requests externos + pode usar Gemini)
+  const rl = checkRateLimit(`discover:${ip}`, 10, 60_000);
+  if (!rl.allowed) return [];
+
+  if (typeof input !== 'string') return [];
+  const trimmed = truncate(input.trim(), LIMITS.DISCOVER_QUERY_MAX);
   if (!trimmed) return [];
 
   const looksLikeUrl = /^https?:\/\//i.test(trimmed) || /\.[a-z]{2,}(\/|$)/i.test(trimmed);
   if (looksLikeUrl) {
     const urlStr = trimmed.startsWith('http') ? trimmed : `https://${trimmed}`;
+    // Proteção SSRF antes de fazer qualquer request
+    const validation = validateExternalUrl(urlStr);
+    if (!validation.ok) return [];
     try {
       new URL(urlStr);
       const direct = await tryDirectRss(urlStr);
