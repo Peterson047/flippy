@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="210mm"
+   height="297mm"
+   viewBox="0 0 210 297"
+   version="1.1"
+   id="svg1"
+   xml:space="preserve"
+   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
+   sodipodi:docname="inomeado.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg"><sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     showguides="true"
+     inkscape:zoom="0.17972959"
+     inkscape:cx="656.54187"
+     inkscape:cy="-136.3159"
+     inkscape:window-width="1920"
+     inkscape:window-height="1009"
+     inkscape:window-x="-8"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="g1"><sodipodi:guide
+       position="40.857103,197.32949"
+       orientation="1,0"
+       id="guide1"
+       inkscape:locked="false" /><sodipodi:guide
+       position="111.05585,159.13981"
+       orientation="1,0"
+       id="guide2"
+       inkscape:locked="false" /></sodipodi:namedview><defs
+     id="defs1"><style
+       id="style1">
+      @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@900&amp;display=swap');
+    </style></defs><g
+     inkscape:label="Camada 1"
+     inkscape:groupmode="layer"
+     id="layer1"><g
+       id="g1"
+       transform="matrix(0.26458333,0,0,0.26458333,91.570036,130.03744)"><text
+         x="-317.2829"
+         y="198.65944"
+         font-family="Poppins, sans-serif"
+         font-weight="900"
+         font-size="208.733px"
+         fill="#ffffff"
+         dominant-baseline="middle"
+         id="text2"
+         style="fill:#000000;stroke-width:4.53768">Flippy</text><path
+         d="M 94.799698,311.20797 C 119.21432,286.73936 82.565468,250.09035 58.096808,274.5049 l -33.34292,33.60136 c -23.1486103,13.76267 -25.50767033,14.50357 -51.69446,0 l -33.34272,-33.60136 c -10.11082,-10.1941 -26.59227,-10.1941 -36.703086,0 -10.194092,10.11083 -10.194092,26.59223 0,36.70307 l 77.541576,77.54144 c 10.1108199,10.19404 26.5921397,10.19404 36.703,0 z"
+         id="path2-4-1"
+         style="stroke-width:25.8471"
+         sodipodi:nodetypes="cccccccccc" /><path
+         d="m 179.31015,85.790361 c 24.4146,24.468599 -12.23423,61.117619 -36.70292,36.703059 l -33.3429,-33.601369 c -23.148572,-13.76266 -25.507622,-14.50353 -51.694462,0 l -33.3427,33.601369 c -10.11083,10.19413 -26.59228,10.19413 -36.70311,0 -10.19409,-10.11082 -10.19409,-26.592239 0,-36.703059 L 65.065628,8.2489209 c 10.11091,-10.19404 26.592234,-10.19404 36.703012,0 z"
+         id="path2-4-1-2"
+         style="stroke-width:25.8471"
+         sodipodi:nodetypes="cccccccccc" /></g></g></svg>

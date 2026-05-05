@@ -120,17 +120,57 @@ export async function scrapeImagesForFeed(feedUrl: string): Promise<void> {
   }
 }
 
+// ─── Image URL upgrade para CDNs conhecidos ──────────────────────────────────
+// Melhora resolução transformando a URL sem nenhum HTTP request adicional.
+
+function upgradeImageUrl(url: string): string {
+  if (!url || url.includes('placehold.co')) return url;
+  try {
+    const { hostname } = new URL(url);
+
+    // Globo / G1: /NNNxMMM/ ou /NNNx/ no path → sobe para /940x/
+    if (hostname.includes('glbimg.com')) {
+      const upgraded = url.replace(/\/\d+x\d*\//, '/940x/');
+      if (upgraded !== url) return upgraded;
+    }
+
+    // WordPress (CNN Brasil, Estadão, etc.): imagem-800x450.jpg → imagem.jpg
+    if (
+      hostname.includes('cnnbrasil.com.br') ||
+      hostname.includes('estadao.com.br') ||
+      hostname.includes('wp.com') ||
+      hostname.includes('wordpress.com')
+    ) {
+      return url.replace(/(-\d{2,4}x\d{2,4})(\.[a-zA-Z]{2,5})(\?.*)?$/, '$2$3');
+    }
+
+    // UOL / Folha: imagem_400x300.jpg → imagem.jpg
+    if (hostname.includes('uol.com.br') || hostname.includes('folha.uol.com.br')) {
+      return url.replace(/_\d{2,4}x\d{2,4}(\.[a-zA-Z]{2,5})$/, '$1');
+    }
+  } catch { /* URL inválida, retorna como está */ }
+  return url;
+}
+
 // ─── Media URL extraction ────────────────────────────────────────────────────
 
 function findMediaUrl(elements: any): string | null {
   if (!elements) return null;
   const list = Array.isArray(elements) ? elements : [elements];
-  for (const m of list) {
-    if (m?.url && (!m.type || m.type.startsWith('image') || m.medium === 'image')) {
-      return m.url;
-    }
-  }
-  return null;
+
+  const valid = list.filter(
+    (m: any) => m?.url && (!m.type || m.type.startsWith('image') || m.medium === 'image')
+  );
+  if (valid.length === 0) return null;
+
+  // Pega a de maior largura — evita thumbnails quando há versão maior disponível
+  const best = valid.reduce((prev: any, curr: any) => {
+    const pw = parseInt(prev.width || '0', 10);
+    const cw = parseInt(curr.width || '0', 10);
+    return cw > pw ? curr : prev;
+  });
+
+  return upgradeImageUrl(best.url);
 }
 
 // ─── RSS Item parser ─────────────────────────────────────────────────────────
@@ -173,6 +213,9 @@ function parseItem(item: any, feedTitle: string, feedUrl: string): NewsArticle {
   if (!imageUrl && contentEncoded) imageUrl = extractFirstImg(contentEncoded) || '';
   if (!imageUrl && atomContent) imageUrl = extractFirstImg(atomContent) || '';
   if (!imageUrl && rawDesc) imageUrl = extractFirstImg(rawDesc) || '';
+
+  // Upgrade de resolução para CDNs conhecidos
+  if (imageUrl) imageUrl = upgradeImageUrl(imageUrl);
 
   const rawCat = getXmlText(item.category) || getXmlText(item['dc:subject']) || '';
   const category = rawCat ? normalizeCategory(rawCat) : undefined;
@@ -227,7 +270,7 @@ function rowToArticle(row: any): NewsArticle {
     articleText: row.article_text || '',
     aiSummary: row.ai_summary || undefined,
     isAiSummary: row.is_ai_summary || false,
-    imageUrl: row.image_url || PLACEHOLDER,
+    imageUrl: upgradeImageUrl(row.image_url || PLACEHOLDER),
     originalUrl: row.original_url,
     sourceName: row.source_name,
     feedUrl: row.feed_url,

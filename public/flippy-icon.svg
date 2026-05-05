@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512"
+     xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Glow branco no logo -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="6" result="blur"/>
+      <feFlood flood-color="#ffffff" flood-opacity="0.35" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+      <feMerge>
+        <feMergeNode in="shadow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Fundo preto -->
+  <circle cx="256" cy="256" r="256" fill="#000000"/>
+  <!-- Borda cinza escura (externa) -->
+  <circle cx="256" cy="256" r="248" fill="none" stroke="#2a2a2a" stroke-width="10"/>
+  <!-- Borda amarela escura (interna) -->
+  <circle cx="256" cy="256" r="236" fill="none" stroke="#8B6F00" stroke-width="8"/>
+
+  <!-- Logo com mais respiro (60% da área) e glow aplicado -->
+  <svg x="26" y="114" width="460" height="284" viewBox="-10 112 210 130">
+    <defs>
+      <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@900&amp;display=swap');
+      </style>
+    </defs>
+    <g transform="matrix(0.26458333,0,0,0.26458333,91.570036,130.03744)"
+       filter="url(#glow)">
+      <text
+        x="-317.2829"
+        y="198.65944"
+        font-family="'Poppins', sans-serif"
+        font-weight="900"
+        font-size="208.733px"
+        fill="#ffffff"
+        dominant-baseline="middle">Flippy</text>
+      <path
+        fill="#ffffff"
+        d="M 94.799698,311.20797 C 119.21432,286.73936 82.565468,250.09035 58.096808,274.5049
+           l -33.34292,33.60136
+           c -23.1486103,13.76267 -25.50767033,14.50357 -51.69446,0
+           l -33.34272,-33.60136
+           c -10.11082,-10.1941 -26.59227,-10.1941 -36.703086,0
+             -10.194092,10.11083 -10.194092,26.59223 0,36.70307
+           l 77.541576,77.54144
+           c 10.1108199,10.19404 26.5921397,10.19404 36.703,0 z"/>
+      <path
+        fill="#ffffff"
+        d="m 179.31015,85.790361
+           c 24.4146,24.468599 -12.23423,61.117619 -36.70292,36.703059
+           l -33.3429,-33.601369
+           c -23.148572,-13.76266 -25.507622,-14.50353 -51.694462,0
+           l -33.3427,33.601369
+           c -10.11083,10.19413 -26.59228,10.19413 -36.70311,0
+             -10.19409,-10.11082 -10.19409,-26.592239 0,-36.703059
+           L 65.065628,8.2489209
+           c 10.11091,-10.19404 26.592234,-10.19404 36.703012,0 z"/>
+    </g>
+  </svg>
+
+</svg>
