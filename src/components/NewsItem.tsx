@@ -66,7 +66,7 @@ export default function NewsItem({ article, isActive, shouldFetchSummary, onArti
       <img
         src={article.imageUrl}
         alt={article.title}
-        loading={isActive ? 'eager' : 'lazy'}
+        loading="eager"
         decoding="async"
         className="absolute inset-0 w-full h-full object-cover"
         style={{ willChange: 'transform' }}

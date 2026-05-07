@@ -15,14 +15,14 @@
   </defs>
 
   <!-- Fundo preto -->
-  <circle cx="256" cy="256" r="256" fill="#000000"/>
+  <circle cx="256" cy="256" r="192" fill="#000000"/>
   <!-- Borda cinza escura (externa) -->
-  <circle cx="256" cy="256" r="248" fill="none" stroke="#2a2a2a" stroke-width="10"/>
+  <circle cx="256" cy="256" r="186" fill="none" stroke="#2a2a2a" stroke-width="8"/>
   <!-- Borda amarela escura (interna) -->
-  <circle cx="256" cy="256" r="236" fill="none" stroke="#8B6F00" stroke-width="8"/>
+  <circle cx="256" cy="256" r="177" fill="none" stroke="#8B6F00" stroke-width="6"/>
 
   <!-- Logo com mais respiro (60% da área) e glow aplicado -->
-  <svg x="26" y="114" width="460" height="284" viewBox="-10 112 210 130">
+  <svg x="84" y="150" width="345" height="213" viewBox="-10 112 210 130">
     <defs>
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@900&amp;display=swap');

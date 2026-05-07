@@ -2,10 +2,16 @@
 
 import type { NewsArticle } from '@/types';
 import NewsItem from './NewsItem';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
 import { usePreferences } from '@/hooks/usePreferences';
+
+const SWIPE_THRESHOLD = 0.22;    // 22% da altura da tela para confirmar slide
+const VELOCITY_THRESHOLD = 0.35; // px/ms — flick rápido também confirma
+const RUBBER_FACTOR = 0.12;      // resistência nas bordas (efeito elástico)
+const SNAP_EASING = 'transform 0.38s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+const LOAD_MORE_THRESHOLD = 5;
 
 interface NewsSwiperProps {
   articles: NewsArticle[];
@@ -17,8 +23,6 @@ interface NewsSwiperProps {
   isLoadingMore: boolean;
 }
 
-const LOAD_MORE_THRESHOLD = 5;
-
 export default function NewsSwiper({
   articles,
   seenArticleIds,
@@ -29,89 +33,126 @@ export default function NewsSwiper({
   isLoadingMore,
 }: NewsSwiperProps) {
   const [activeIndex, setActiveIndex] = useState(0);
-  const swiperRef = useRef<HTMLDivElement>(null);
-  const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const initialScrollDone = useRef(false);
-  const prevArticlesRef = useRef<NewsArticle[] | null>(null);
+  const activeIndexRef = useRef(0);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const isTransitioning = useRef(false);
+  const touchStartY = useRef(0);
+  const touchCurrentY = useRef(0);
+  const touchStartTime = useRef(0);
   const loadMoreTriggered = useRef(false);
-
   const activatedAt = useRef(Date.now());
-  const prevActiveIndex = useRef(0);
+  const prevIndexRef = useRef(0);
   const { trackDwell, trackClick } = usePreferences();
 
-  // Dispara load more quando o usuário está perto do fim
+  const showLoader = isLoadingMore || hasMore;
+  const totalSlidesRef = useRef(0);
+  totalSlidesRef.current = articles.length + (showLoader ? 1 : 0);
+
+  const getVH = () => viewportRef.current?.clientHeight ?? window.innerHeight;
+
+  const applyTransform = useCallback((extraOffset = 0, animated = false) => {
+    if (!wrapperRef.current) return;
+    const y = -activeIndexRef.current * getVH() + extraOffset;
+    wrapperRef.current.style.transition = animated ? SNAP_EASING : 'none';
+    wrapperRef.current.style.transform = `translateY(${y}px)`;
+  }, []);
+
+  const goToIndex = useCallback((newIndex: number) => {
+    const clamped = Math.max(0, Math.min(newIndex, totalSlidesRef.current - 1));
+    isTransitioning.current = true;
+    activeIndexRef.current = clamped;
+    setActiveIndex(clamped);
+    applyTransform(0, true);
+    setTimeout(() => { isTransitioning.current = false; }, 420);
+  }, [applyTransform]);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (isTransitioning.current) return;
+    touchStartY.current = e.touches[0].clientY;
+    touchCurrentY.current = e.touches[0].clientY;
+    touchStartTime.current = Date.now();
+    if (wrapperRef.current) wrapperRef.current.style.transition = 'none';
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (isTransitioning.current) return;
+    touchCurrentY.current = e.touches[0].clientY;
+    let delta = touchCurrentY.current - touchStartY.current;
+
+    // Resistência nas bordas: primeiro e último slide têm efeito elástico
+    const atTop = activeIndexRef.current === 0;
+    const atBottom = activeIndexRef.current >= totalSlidesRef.current - 1;
+    if ((atTop && delta > 0) || (atBottom && delta < 0)) {
+      delta *= RUBBER_FACTOR;
+    }
+
+    applyTransform(delta, false);
+  }, [applyTransform]);
+
+  const handleTouchEnd = useCallback(() => {
+    if (isTransitioning.current) return;
+    const delta = touchCurrentY.current - touchStartY.current;
+    const elapsed = Math.max(Date.now() - touchStartTime.current, 1);
+    const velocity = Math.abs(delta) / elapsed;
+    const vh = getVH();
+    const swipedEnough = Math.abs(delta) > vh * SWIPE_THRESHOLD;
+    const fastEnough = velocity > VELOCITY_THRESHOLD;
+
+    // Sempre avança apenas 1 slide por gesto, independente da velocidade
+    if (delta < 0 && (swipedEnough || fastEnough)) {
+      goToIndex(activeIndexRef.current + 1);
+    } else if (delta > 0 && (swipedEnough || fastEnough)) {
+      goToIndex(activeIndexRef.current - 1);
+    } else {
+      applyTransform(0, true); // snap de volta com animação elástica
+    }
+  }, [applyTransform, goToIndex]);
+
+  // Resync transform quando artigos mudam (ex: novos artigos carregados)
   useEffect(() => {
-    const distanceFromEnd = articles.length - 1 - activeIndex;
-    if (distanceFromEnd <= LOAD_MORE_THRESHOLD && hasMore && !isLoadingMore && !loadMoreTriggered.current) {
+    applyTransform(0, false);
+  }, [articles, applyTransform]);
+
+  // Load more
+  useEffect(() => {
+    const dist = articles.length - 1 - activeIndex;
+    if (dist <= LOAD_MORE_THRESHOLD && hasMore && !isLoadingMore && !loadMoreTriggered.current) {
       loadMoreTriggered.current = true;
       onLoadMore();
     }
-    // Reseta o trigger quando novos artigos chegam
-    if (distanceFromEnd > LOAD_MORE_THRESHOLD) {
-      loadMoreTriggered.current = false;
-    }
+    if (dist > LOAD_MORE_THRESHOLD) loadMoreTriggered.current = false;
   }, [activeIndex, articles.length, hasMore, isLoadingMore, onLoadMore]);
 
   // Dwell time
   useEffect(() => {
     const now = Date.now();
-    const dwellMs = now - activatedAt.current;
-    if (prevActiveIndex.current !== activeIndex && articles[prevActiveIndex.current]) {
-      trackDwell(articles[prevActiveIndex.current], dwellMs);
+    const dwell = now - activatedAt.current;
+    if (prevIndexRef.current !== activeIndex && articles[prevIndexRef.current]) {
+      trackDwell(articles[prevIndexRef.current], dwell);
     }
-    prevActiveIndex.current = activeIndex;
+    prevIndexRef.current = activeIndex;
     activatedAt.current = now;
   }, [activeIndex]);
 
-  // Ajusta refs quando artigos mudam
+  // Marcar como visto
   useEffect(() => {
-    itemRefs.current = itemRefs.current.slice(0, articles.length);
-    if (articles.length > 0 && activeIndex >= articles.length) {
-      setActiveIndex(articles.length - 1);
-    }
-  }, [articles.length]);
-
-  // Scroll inicial para primeiro artigo não visto
-  useEffect(() => {
-    if (prevArticlesRef.current !== articles) {
-      initialScrollDone.current = false;
-      prevArticlesRef.current = articles;
-    }
-    if (articles.length === 0 || !swiperRef.current || initialScrollDone.current) return;
-
-    const firstUnseen = articles.findIndex(a => !seenArticleIds.includes(a.id));
-    const target = firstUnseen !== -1 ? firstUnseen : 0;
-    itemRefs.current[target]?.scrollIntoView({ behavior: 'auto' });
-    initialScrollDone.current = true;
-  }, [articles, seenArticleIds]);
-
-  // IntersectionObserver
-  useEffect(() => {
-    if (!swiperRef.current || articles.length === 0) return;
-    const observer = new IntersectionObserver(
-      entries => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            const idx = itemRefs.current.findIndex(r => r === entry.target);
-            if (idx !== -1) setActiveIndex(idx);
-          }
-        });
-      },
-      { root: swiperRef.current, threshold: 0.75 }
-    );
-    const refs = itemRefs.current.filter(Boolean) as HTMLDivElement[];
-    refs.forEach(r => observer.observe(r));
-    return () => { refs.forEach(r => observer.unobserve(r)); observer.disconnect(); };
-  }, [articles]);
-
-  // Marca artigo ativo como visto
-  useEffect(() => {
-    if (articles.length === 0 || activeIndex >= articles.length) return;
-    const active = articles[activeIndex];
-    if (active && !seenArticleIds.includes(active.id)) {
-      setSeenArticleIds(prev => prev.includes(active.id) ? prev : [...prev, active.id]);
+    const article = articles[activeIndex];
+    if (!article) return;
+    if (!seenArticleIds.includes(article.id)) {
+      setSeenArticleIds(prev => prev.includes(article.id) ? prev : [...prev, article.id]);
     }
   }, [activeIndex, articles]);
+
+  // Navegação por teclado
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowDown') goToIndex(activeIndexRef.current + 1);
+      if (e.key === 'ArrowUp') goToIndex(activeIndexRef.current - 1);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [goToIndex]);
 
   if (articles.length === 0) {
     return (
@@ -140,33 +181,38 @@ export default function NewsSwiper({
 
   return (
     <div
-      ref={swiperRef}
-      className="h-screen w-screen overflow-y-auto snap-y snap-mandatory no-scrollbar snap-stop-always overscroll-y-contain"
+      ref={viewportRef}
+      className="h-screen w-screen overflow-hidden touch-none select-none"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
     >
-      {articles.map((article, index) => (
-        <div
-          key={article.id}
-          ref={el => { itemRefs.current[index] = el; }}
-          className="h-screen w-screen snap-start flex-shrink-0 relative"
-        >
-          <NewsItem
-            article={article}
-            isActive={index === activeIndex}
-            shouldFetchSummary={index === activeIndex + 1}
-            onArticleClick={trackClick}
-          />
-        </div>
-      ))}
-
-      {/* Indicador de carregamento de mais artigos */}
-      {(isLoadingMore || hasMore) && (
-        <div className="h-screen w-screen snap-start flex-shrink-0 flex items-center justify-center bg-background">
-          <div className="flex flex-col items-center gap-3 text-muted-foreground">
-            <Loader2 className="h-8 w-8 animate-spin" />
-            <p className="text-sm">Carregando mais notícias...</p>
+      <div
+        ref={wrapperRef}
+        className="flex flex-col w-full"
+        style={{ willChange: 'transform' }}
+      >
+        {articles.map((article, index) => (
+          <div key={article.id} className="h-screen w-screen flex-shrink-0">
+            <NewsItem
+              article={article}
+              isActive={index === activeIndex}
+              shouldFetchSummary={index === activeIndex + 1}
+              onArticleClick={trackClick}
+            />
           </div>
-        </div>
-      )}
+        ))}
+
+        {showLoader && (
+          <div className="h-screen w-screen flex-shrink-0 flex items-center justify-center bg-background">
+            <div className="flex flex-col items-center gap-3 text-muted-foreground">
+              <Loader2 className="h-8 w-8 animate-spin" />
+              <p className="text-sm">Carregando mais notícias...</p>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

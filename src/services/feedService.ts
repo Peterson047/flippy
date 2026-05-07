@@ -36,8 +36,29 @@ function getLinkUrl(field: any): string {
   return '';
 }
 
+const IMAGE_EXT_RE = /\.(jpe?g|png|gif|webp|avif|svg)(\?|$)/i;
+
 function extractFirstImg(html: string): string | null {
-  return html?.match(/<img[^>]+src="([^">]+)"/)?.[1] || null;
+  if (!html) return null;
+  // src com aspas duplas ou simples
+  const src = html.match(/<img[^>]+\bsrc=["']([^"']+)["']/i)?.[1];
+  if (src) return src;
+  // data-src (lazy-loading)
+  const dataSrc = html.match(/<img[^>]+\bdata-src=["']([^"']+)["']/i)?.[1];
+  if (dataSrc) return dataSrc;
+  // srcset — pega a de maior largura declarada
+  const srcset = html.match(/<img[^>]+\bsrcset=["']([^"']+)["']/i)?.[1];
+  if (srcset) {
+    const best = srcset.split(',')
+      .map(s => { const p = s.trim().split(/\s+/); return { url: p[0], w: parseInt(p[1] ?? '0') }; })
+      .filter(c => c.url)
+      .sort((a, b) => b.w - a.w)[0];
+    if (best?.url) return best.url;
+  }
+  // <figure> com imagem
+  const fig = html.match(/<figure[^>]*>[\s\S]*?<img[^>]+\bsrc=["']([^"']+)["']/i)?.[1];
+  if (fig) return fig;
+  return null;
 }
 
 function stripHtml(html: string): string {
@@ -126,29 +147,53 @@ export async function scrapeImagesForFeed(feedUrl: string): Promise<void> {
 function upgradeImageUrl(url: string): string {
   if (!url || url.includes('placehold.co')) return url;
   try {
-    const { hostname } = new URL(url);
+    const u = new URL(url);
+    const host = u.hostname;
 
-    // Globo / G1: /NNNxMMM/ ou /NNNx/ no path → sobe para /940x/
-    if (hostname.includes('glbimg.com')) {
-      const upgraded = url.replace(/\/\d+x\d*\//, '/940x/');
-      if (upgraded !== url) return upgraded;
+    // Globo / G1 / Sportv (glbimg.com, s2.glbimg.com…): /NNNxMMM/ → /940x/
+    if (host.includes('glbimg.com')) {
+      return url.replace(/\/\d+x\d*\//, '/940x/');
     }
 
-    // WordPress (CNN Brasil, Estadão, etc.): imagem-800x450.jpg → imagem.jpg
+    // WordPress Jetpack CDN (i0/i1/i2.wp.com): remove params de resize
+    if (/^i\d\.wp\.com$/.test(host)) {
+      ['w', 'h', 'fit', 'resize', 'quality', 'strip'].forEach(p => u.searchParams.delete(p));
+      return u.toString();
+    }
+
+    // Publishers WordPress (-800x450.jpg → .jpg)
     if (
-      hostname.includes('cnnbrasil.com.br') ||
-      hostname.includes('estadao.com.br') ||
-      hostname.includes('wp.com') ||
-      hostname.includes('wordpress.com')
+      host.includes('cnnbrasil.com.br') ||
+      host.includes('estadao.com.br') ||
+      host.includes('wp.com') ||
+      host.includes('wordpress.com') ||
+      host.includes('veja.abril.com.br') ||
+      host.includes('exame.com') ||
+      host.includes('band.uol.com.br') ||
+      host.includes('cartacapital.com.br') ||
+      host.includes('hypeness.com.br')
     ) {
       return url.replace(/(-\d{2,4}x\d{2,4})(\.[a-zA-Z]{2,5})(\?.*)?$/, '$2$3');
     }
 
-    // UOL / Folha: imagem_400x300.jpg → imagem.jpg
-    if (hostname.includes('uol.com.br') || hostname.includes('folha.uol.com.br')) {
+    // UOL / Folha / R7 (imagem_400x300.jpg → imagem.jpg)
+    if (
+      host.includes('uol.com.br') ||
+      host.includes('r7.com') ||
+      host.includes('record.com.br')
+    ) {
       return url.replace(/_\d{2,4}x\d{2,4}(\.[a-zA-Z]{2,5})$/, '$1');
     }
-  } catch { /* URL inválida, retorna como está */ }
+
+    // Genérico: ?w=NNN ou ?width=NNN em URLs com extensão de imagem
+    if (IMAGE_EXT_RE.test(u.pathname)) {
+      let changed = false;
+      ['w', 'h', 'width', 'height', 'resize', 'fit'].forEach(p => {
+        if (u.searchParams.has(p)) { u.searchParams.delete(p); changed = true; }
+      });
+      if (changed) return u.toString();
+    }
+  } catch { /* URL inválida */ }
   return url;
 }
 
@@ -203,7 +248,14 @@ function parseItem(item: any, feedTitle: string, feedUrl: string): NewsArticle {
   if (!imageUrl) imageUrl = findMediaUrl(item['media:thumbnail']) || '';
   if (!imageUrl && item.enclosure) {
     const encs = Array.isArray(item.enclosure) ? item.enclosure : [item.enclosure];
-    imageUrl = encs.find((e: any) => e.url && e.type?.startsWith('image'))?.url || '';
+    // Aceita enclosures com type de imagem OU URL com extensão de imagem conhecida
+    imageUrl = encs.find((e: any) => e.url && (e.type?.startsWith('image') || IMAGE_EXT_RE.test(e.url ?? '')))?.url || '';
+  }
+  // Atom: <link rel="enclosure" type="image/..." href="...">
+  if (!imageUrl) {
+    const links = item.link ? (Array.isArray(item.link) ? item.link : [item.link]) : [];
+    const imgLink = links.find((l: any) => l.rel === 'enclosure' && l.type?.startsWith('image'));
+    if (imgLink?.href) imageUrl = imgLink.href;
   }
   if (!imageUrl && item['itunes:image']?.[0]?.href) imageUrl = item['itunes:image'][0].href;
   if (!imageUrl && item.image) {
@@ -213,6 +265,9 @@ function parseItem(item: any, feedTitle: string, feedUrl: string): NewsArticle {
   if (!imageUrl && contentEncoded) imageUrl = extractFirstImg(contentEncoded) || '';
   if (!imageUrl && atomContent) imageUrl = extractFirstImg(atomContent) || '';
   if (!imageUrl && rawDesc) imageUrl = extractFirstImg(rawDesc) || '';
+
+  // Descarta URLs inválidas (relativas, data:, blob:, etc.)
+  if (imageUrl && !imageUrl.startsWith('http')) imageUrl = '';
 
   // Upgrade de resolução para CDNs conhecidos
   if (imageUrl) imageUrl = upgradeImageUrl(imageUrl);
